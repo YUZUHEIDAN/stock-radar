@@ -205,7 +205,7 @@ function open_(key){
   <div class="act" style="background:${col}">${t.actionText}</div>
   <div class="card" style="padding:10px 6px"><canvas id="cv"></canvas></div>
   <div class="plan">
-   <div style="border-color:#2fd18b"><span>สัญญาณ ${thd(t.sigDate)}</span><b>${t.tags.map(k=>TAG[k]).join(' + ')}</b></div>
+   <div style="border-color:#2fd18b"><span>สัญญาณ ${thd(t.sigDate)}</span><b style="font-family:inherit;font-size:14px">${t.tags.map(k=>TAG[k]).join(' + ')}</b></div>
    <div style="border-color:#e8edf3"><span>${t.entry?'ซื้อที่ (เปิด '+thd(t.entryDate)+')':'ราคาปิดวันสัญญาณ'}</span><b>$${fmt(t.entry||t.sigClose)}</b></div>
    <div style="border-color:#f5b84a"><span>ขายเมื่อราคาปิดเหนือ SMA5</span><b>$${fmt(t.sma5)}</b></div>
    <div style="border-color:#5aa9ff"><span>${t.status==='open'?'ผลตอนนี้ · วันที่':'ถือสูงสุด'}</span><b>${t.status==='open'?pct(t.ret)+' · '+t.day+'/10':'10 วัน'}</b></div>
