@@ -56,16 +56,17 @@ def main():
         six = spy_df.index.get_indexer(df.index)
         n = len(I.c)
         for t in range(600, n - 21):
-            if not fresh_cross(I, t) or not np.isfinite(I.atr[t]):
+            is_x = fresh_cross(I, t)
+            if not np.isfinite(I.atr[t]) or not (is_x or t % 10 == 0):
                 continue
             if not (I.c[t] > 5 and I.dv20[t] > 20e6):
                 continue
             st = six[t]
-            p = plan(I, t)
+            p = plan(I, t) if is_x else {"rr": np.nan, "noRes": None}
             mo, wo = I.mon.at(t), wk.at(t)
             hi252 = I.h[max(0, t - 252): t + 1].max()
             r = {
-                "tk": tk, "date": df.index[t].date(), "score": score(I, t, spy, st)["total"],
+                "tk": tk, "date": df.index[t].date(), "is_cross": is_x, "score": score(I, t, spy, st)["total"] if is_x else np.nan,
                 "mon_up": mo["up"] if mo else None, "mon_rising": mo["rising"] if mo else None,
                 "mon_pos": (mo["m"] > 0) if mo else None,
                 "wk_up": wo["up"] if wo else None, "wk_pos": (wo["m"] > 0) if wo else None,
@@ -80,7 +81,7 @@ def main():
                 "dist_52wh": I.c[t] / hi252 - 1, "atr_pct": I.atr[t] / I.c[t],
                 "rr": p["rr"], "no_res": p["noRes"], "spy_bull": spy.c[st] > spy.e200[st],
                 "spy_e200": spy.c[st] / spy.e200[st] - 1, "ldv": np.log10(I.dv20[t]),
-                "plan_ret": outcome(I, t, p, 20)["ret"],
+                "plan_ret": outcome(I, t, p, 20)["ret"] if is_x else np.nan, "macd_gt_sig": I.m[t] > I.s[t],
             }
             for h in H:
                 if t + h < n:
