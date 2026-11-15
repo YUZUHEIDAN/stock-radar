@@ -1,6 +1,10 @@
 name: Research dataset
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      script:
+        description: research script in scanner/
+        default: research_exits.py
 permissions:
   contents: write
 concurrency: scan
@@ -15,7 +19,7 @@ jobs:
           python-version: '3.12'
           cache: pip
       - run: pip install -r requirements.txt
-      - run: python scanner/research.py
+      - run: python scanner/${{ inputs.script }}
       - run: |
           git config user.name "stock-radar-bot"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
