@@ -80,13 +80,16 @@ ul.rules{padding-left:18px;font-size:13.5px;line-height:1.75}
 .chip{display:inline-block;border:1px solid var(--line);background:var(--card);color:var(--tx);padding:7px 12px;border-radius:99px;font-size:13px;text-decoration:none}
 .empty{text-align:center;padding:26px 14px;color:var(--mut);font-size:13.5px}
 .hide{display:none}
+.seg{display:flex;background:var(--card);border:1px solid var(--line);border-radius:99px;padding:3px}
+.seg button{background:none;border:0;color:var(--mut);font:inherit;font-size:12.5px;font-weight:600;padding:5px 13px;border-radius:99px;cursor:pointer}
+.seg button.on{background:var(--tx);color:var(--bg)}
 </style>
 </head>
 <body>
 <div class="app">
   <header>
     <div class="brand"><div class="logo"></div><div><h1>Stock Radar</h1><div class="sub" id="asof">กำลังโหลด…</div></div></div>
-    <span class="pill">Pullback · S&P 500</span>
+    <div class="seg" id="seg"><button data-m="etf" class="on">ETF</button><button data-m="stk">หุ้น</button></div>
   </header>
   <section id="v-buy"></section>
   <section id="v-open" class="hide"></section>
@@ -103,85 +106,102 @@ ul.rules{padding-left:18px;font-size:13.5px;line-height:1.75}
 <div class="sheet" id="sheet"><div class="panel" id="panel"></div></div>
 
 <script>
-let D;
+let D,M='etf';
+try{M=localStorage.getItem('sr_mode')||'etf'}catch(e){}
+const X=()=>D[M];
 const $=s=>document.querySelector(s);
 const fmt=(x,d=2)=>x==null?'–':x.toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
 const pct=(x,d=1)=>x==null?'–':(x>=0?'+':'')+(x*100).toFixed(d)+'%';
 const thd=iso=>new Date(iso+'T00:00:00Z').toLocaleDateString('th-TH',{day:'numeric',month:'short',timeZone:'UTC'});
-const TAG={bb:'หลุด Bollinger ล่าง',rsi2:'RSI(2) < 5'};
-const WHY={above_sma5:'ปิดเหนือ SMA5',time:'ครบ 10 วัน',stop:'Stop'};
-const ACT={buy_open:['g','ซื้อ'],sell_open:['r','ขาย'],sell_close:['r','ขาย'],hold:['b','ถือ']};
+const TAG={bb:'หลุด Bollinger ล่าง',rsi2:'RSI(2) < 5',vix:'VIX > 15'};
+const WHY={above_sma5:'ปิดเหนือ SMA5',time:'ครบ 10 วัน',stop:'Stop',rsi2_70:'RSI(2) > 70'};
+const ACT={buy_open:['g','ซื้อ'],buy_limit:['g','Buy limit'],sell_open:['r','ขาย'],sell_close:['r','ขาย'],hold:['b','ถือ']};
+const BTM=()=>M==='etf'?X().bt:X().bt.bb;
+const avg=a=>a.reduce((s,t)=>s+(t.ret||0),0)/(a.length||1);
 
 function row(t,kind){
-  const tags=t.tags.map(k=>`<span class="tag">${TAG[k]}</span>`).join('');
+  const tags=t.tags.filter(k=>k!=='vix').map(k=>`<span class="tag">${TAG[k]}</span>`).join('');
   let right,cls,extra='';
-  if(kind==='buy'){cls='buy';right=`<div class="p">$${fmt(t.sigClose)}</div><div class="num ${t.chg>=0?'up':'dn'}" style="font-size:12px">${pct(t.chg,2)}</div>`}
+  if(kind==='buy'){cls='buy';
+    right=M==='etf'?`<div class="note">Buy limit</div><div class="p">$${fmt(t.limit)}</div><div class="note">ปิด $${fmt(t.sigClose)}</div>`:`<div class="p">$${fmt(t.sigClose)}</div><div class="num ${t.chg>=0?'up':'dn'}" style="font-size:12px">${pct(t.chg,2)}</div>`}
   else{const[a,l]=ACT[t.action]||['','']; cls=t.action.startsWith('sell')?'sell':'hold';
     right=`<div class="p ${t.ret>=0?'up':'dn'}">${pct(t.ret)}</div><div class="note">วันที่ ${t.day}/10</div>`;
     extra=`<span class="tag ${a}">${l}</span>`}
-  return `<div class="row ${cls}" data-k="${t.key}"><div style="min-width:0"><div class="tk">${t.tk}</div><div class="nm">${t.name||''}${t.sector?' · '+t.sector:''}</div><div class="tags">${extra}${tags}</div></div><div class="px">${right}</div></div>`;
+  return `<div class="row ${cls}" data-k="${t.key}"><div style="min-width:0"><div class="tk">${t.tk}</div><div class="nm">${t.name||''}${t.sector&&t.sector!=='ETF'?' · '+t.sector:''}</div><div class="tags">${extra}${tags}</div></div><div class="px">${right}</div></div>`;
 }
 
 function renderBuy(){
-  const T=D.today, bt=D.bt;
-  $('#v-buy').innerHTML=`
-  ${D.spy.aboveSma200?'':'<div class="banner warn"><span class="dot" style="background:var(--amb)"></span><div>SPY อยู่ใต้ SMA200 (ตลาดขาลง) ระวังเป็นพิเศษ กลยุทธ์นี้ทดสอบมาในตลาดทุกสภาพ แต่ drawdown จะหนักกว่า</div></div>'}
-  <div class="banner info"><span class="dot" style="background:var(--acc)"></span><div><b>กติกา:</b> ซื้อที่ราคาเปิดรอบถัดไป · ขายเมื่อราคาปิด &gt; SMA5 (ขายที่ราคาเปิดวันถัดไป) หรือครบ 10 วัน · Backtest: win ${(bt.bb.win*100).toFixed(0)}% · เฉลี่ย ${pct(bt.bb.avg,2)}/ไม้ · ถือ ~${bt.days} วัน</div></div>
-  <div class="sect">สัญญาณซื้อวันนี้ (${T.length})</div>
-  <div class="list">${T.length?T.map(t=>row(t,'buy')).join(''):'<div class="card empty">วันนี้ไม่มีหุ้นเข้าเงื่อนไข<br>เป็นเรื่องปกติ ช่วงตลาดขึ้นต่อเนื่องสัญญาณจะน้อย</div>'}</div>
-  <p class="note" style="margin-top:12px">⚠️ ไม่มี Stop loss ตามกติกา (ทดสอบแล้ว stop ทำให้ผลเฉลี่ยแย่ลง) แต่ไม้ที่แย่สุด 1% ขาดทุน ≥ ${pct(bt.bb.p1,0)} และแย่สุดเคย ${pct(bt.bb.worst,0)} · จำกัดเงินต่อไม้ไม่เกิน ~5% ของพอร์ต</p>`;
+  const S=X(),T=S.today,bt=BTM();
+  let top='';
+  if(M==='etf'){
+    const v=S.vix;
+    top=`<div class="banner ${v>15?'bull':'warn'}"><span class="dot" style="background:${v>15?'var(--up)':'var(--amb)'}"></span><div>VIX ${fmt(v,1)} · ${v>15?'สัญญาณใช้งานได้ (ต้องการ VIX > 15)':'VIX ต่ำกว่า 15 → ระบบงดสัญญาณ (ช่วงนี้ในอดีต win แค่ ~50%)'}</div></div>
+    <div class="banner info"><span class="dot" style="background:var(--acc)"></span><div><b>กติกา:</b> ตั้ง Buy limit ตามราคาที่ให้ ใช้ได้รอบถัดไปรอบเดียว · ขายที่ราคาเปิดหลัง RSI(2) ปิด &gt; 70 หรือครบ 10 วัน · Backtest: win ${(bt.win*100).toFixed(0)}% · เฉลี่ย ${pct(bt.avg,2)}/ไม้ · ~${bt.perYr} ไม้/ปี</div></div>`;
+  } else {
+    top=`${D.spy.aboveSma200?'':'<div class="banner warn"><span class="dot" style="background:var(--amb)"></span><div>SPY อยู่ใต้ SMA200 ระวังเป็นพิเศษ</div></div>'}
+    <div class="banner warn"><span class="dot" style="background:var(--amb)"></span><div><b>โหมดทดลอง:</b> หุ้นรายตัวมี survivorship bias และไม้แย่สุดเคย ${pct(bt.worst,0)} · ใช้ ETF เป็นหลัก</div></div>
+    <div class="banner info"><span class="dot" style="background:var(--acc)"></span><div><b>กติกา:</b> ซื้อที่ราคาเปิดรอบถัดไป · ขายเมื่อปิด &gt; SMA5 หรือครบ 10 วัน · Backtest: win ${(bt.win*100).toFixed(0)}% · เฉลี่ย ${pct(bt.avg,2)}/ไม้</div></div>`;
+  }
+  const watch=M==='etf'?`<div class="sect">ใกล้เข้าเงื่อนไข (ห่างจาก BB ล่าง)</div><div class="card" style="padding:6px 12px"><table>${S.watch.slice(0,6).map(w=>`<tr><td><b>${w.tk}</b> <span class="note">${w.name}</span></td><td>${w.up?'':'<span class="note">ใต้ SMA200</span> '}${pct(w.dist)}</td></tr>`).join('')}</table></div>`:'';
+  $('#v-buy').innerHTML=`${top}
+  <div class="sect">สัญญาณวันนี้ (${T.length})</div>
+  <div class="list">${T.length?T.map(t=>row(t,'buy')).join(''):`<div class="card empty">วันนี้ไม่มีสัญญาณ<br>${M==='etf'?'เป็นเรื่องปกติ เฉลี่ยมีสัญญาณที่ได้ของแค่ ~2 ครั้ง/เดือน':'ช่วงตลาดขึ้นต่อเนื่องสัญญาณจะน้อย'}</div>`}</div>
+  ${watch}
+  <p class="note" style="margin-top:12px">⚠️ ไม่มี Stop loss ตามกติกา (ทดสอบแล้ว stop ทำให้ผลแย่ลง) ไม้แย่สุดในอดีต ${pct(bt.worst,0)} · ${M==='etf'?'แบ่งเงินเป็น 3–5 ช่อง ไม่ใช้ leverage · เงินว่างพักในกองทุนตลาดเงิน':'จำกัดเงินต่อไม้ไม่เกิน ~5% ของพอร์ต'}</p>`;
 }
 function renderOpen(){
-  const O=D.open, sells=O.filter(t=>t.action.startsWith('sell'));
+  const O=X().open, sells=O.filter(t=>t.action.startsWith('sell'));
   $('#v-open').innerHTML=`
   <div class="stats"><div class="st"><b>${O.length}</b><span>เปิดอยู่</span></div><div class="st"><b class="dn">${sells.length}</b><span>ต้องขาย</span></div><div class="st"><b>${O.length-sells.length}</b><span>ถือต่อ</span></div><div class="st"><b class="${avg(O)>=0?'up':'dn'}">${O.length?pct(avg(O)):'–'}</b><span>เฉลี่ย</span></div></div>
   ${sells.length?`<div class="sect">ต้องขาย</div><div class="list">${sells.map(t=>row(t,'open')).join('')}</div>`:''}
   <div class="sect">ถือต่อ</div><div class="list">${O.filter(t=>t.action==='hold').map(t=>row(t,'open')).join('')||'<div class="card empty">ไม่มี</div>'}</div>
-  <p class="note" style="margin-top:12px">รายการนี้คือทุกสัญญาณที่ระบบติดตามอัตโนมัติ (สมมติว่าซื้อทุกตัว) ถ้าโบ๊ทซื้อจริงแค่บางตัว ให้ดูเฉพาะตัวที่ถืออยู่</p>`;
+  <p class="note" style="margin-top:12px">ระบบติดตามทุกสัญญาณที่${M==='etf'?'ได้ของตามกติกา Buy limit':'เกิดขึ้น'}อัตโนมัติ ถ้าซื้อจริงแค่บางตัว ให้ดูเฉพาะตัวที่ถืออยู่</p>`;
 }
-const avg=a=>a.reduce((s,t)=>s+(t.ret||0),0)/(a.length||1);
 function renderLive(){
-  const f=D.fwd, C=D.recentClosed, bt=D.bt;
-  const cmp=(l,a,b,fm)=>`<tr><td>${l}</td><td>${a}</td><td>${b}</td></tr>`;
+  const f=X().fwd, C=X().recentClosed, bt=BTM();
+  const tr=(l,a,b)=>`<tr><td>${l}</td><td>${a}</td><td>${b}</td></tr>`;
   $('#v-live').innerHTML=`
-  <div class="card"><h3>ผลจริงล่วงหน้า (Paper trade)</h3><p class="note">นับเฉพาะสัญญาณตั้งแต่ ${thd(f.started)} เป็นต้นไป ไม่มี bias จากการ backtest · ควรมี ≥ 100 ไม้ก่อนเชื่อตัวเลข</p>
+  <div class="card"><h3>ผลจริงล่วงหน้า (Paper trade) · ${M==='etf'?'ETF':'หุ้น'}</h3><p class="note">นับเฉพาะสัญญาณตั้งแต่ ${thd(f.started)} · ไม่มี bias · ควรมี ≥ ${M==='etf'?30:100} ไม้ก่อนเชื่อตัวเลข${M==='etf'?` · ไม่ได้ของ ${f.nofill} ครั้ง`:''}</p>
   <table style="margin-top:8px"><tr><th></th><th>ผลจริง</th><th>Backtest</th></tr>
-  ${cmp('จำนวนไม้',f.n,bt.bb.n.toLocaleString())}${cmp('Win rate',f.n?(f.win*100).toFixed(0)+'%':'–',(bt.bb.win*100).toFixed(0)+'%')}
-  ${cmp('เฉลี่ย/ไม้',f.n?pct(f.avg,2):'–',pct(bt.bb.avg,2))}${cmp('Profit factor',f.n?(f.pf>=99?'∞':f.pf.toFixed(2)):'–',bt.bb.pf.toFixed(2))}
-  ${cmp('แย่สุด',f.n?pct(f.worst):'–',pct(bt.bb.worst,0))}</table>
-  ${f.n<100?`<div class="banner warn" style="margin-top:10px"><span class="dot" style="background:var(--amb)"></span><div>ยังเก็บได้ ${f.n}/100 ไม้ ตัวเลขยังเชื่อไม่ได้</div></div>`:''}</div>
+  ${tr('จำนวนไม้',f.n,bt.n.toLocaleString())}${tr('Win rate',f.n?(f.win*100).toFixed(0)+'%':'–',(bt.win*100).toFixed(0)+'%')}
+  ${tr('เฉลี่ย/ไม้',f.n?pct(f.avg,2):'–',pct(bt.avg,2))}${tr('Profit factor',f.n?(f.pf>=99?'∞':f.pf.toFixed(2)):'–',bt.pf.toFixed(2))}
+  ${tr('แย่สุด',f.n?pct(f.worst):'–',pct(bt.worst,0))}</table>
+  ${f.n<(M==='etf'?30:100)?`<div class="banner warn" style="margin-top:10px"><span class="dot" style="background:var(--amb)"></span><div>ยังเก็บได้ ${f.n}/${M==='etf'?30:100} ไม้ ตัวเลขยังเชื่อไม่ได้</div></div>`:''}</div>
   <div class="sect">ปิดสถานะล่าสุด</div>
-  <div class="card" style="padding:6px 12px">${C.length?`<table><tr><th>หุ้น</th><th>ซื้อ</th><th>ขาย</th><th>เหตุผล</th><th>ผล</th></tr>${C.map(t=>`<tr><td><b>${t.tk}</b></td><td>${thd(t.entryDate)}</td><td>${thd(t.exitDate)}</td><td style="font-family:inherit;font-size:12px">${WHY[t.why]||t.why}</td><td class="${t.ret>=0?'up':'dn'}">${pct(t.ret)}</td></tr>`).join('')}</table>`:'<div class="empty">ยังไม่มีไม้ที่ปิด</div>'}</div>`;
+  <div class="card" style="padding:6px 12px">${C.length?`<table><tr><th>ตัว</th><th>ซื้อ</th><th>ขาย</th><th>เหตุผล</th><th>ผล</th></tr>${C.map(t=>`<tr><td><b>${t.tk}</b></td><td>${thd(t.entryDate)}</td><td>${thd(t.exitDate)}</td><td style="font-family:inherit;font-size:12px">${WHY[t.why]||t.why}</td><td class="${t.ret>=0?'up':'dn'}">${pct(t.ret)}</td></tr>`).join('')}</table>`:'<div class="empty">ยังไม่มีไม้ที่ปิด</div>'}</div>`;
 }
 function renderRes(){
-  const bt=D.bt;
+  const e=D.etf.bt,s=D.stk.bt;
   $('#v-res').innerHTML=`
-  <div class="card"><h3>กติกา</h3><ul class="rules">
-   <li>หุ้น S&P 500 ราคา &gt; $5 มูลค่าซื้อขาย &gt; $20M/วัน</li>
-   <li>ราคาอยู่เหนือ SMA200 (ขาขึ้นระยะยาว)</li>
-   <li>ราคาปิดหลุด Bollinger Band ล่าง (20,2) <b>หรือ</b> RSI(2) &lt; 5</li>
-   <li><b>ซื้อ:</b> ราคาเปิดรอบถัดไป</li>
-   <li><b>ขาย:</b> ราคาปิด &gt; SMA5 → ขายที่ราคาเปิดวันถัดไป · หรือขายตอนปิดวันที่ 10</li>
-   <li>ไม่ซ้อนไม้ในหุ้นตัวเดียวกัน</li></ul></div>
-  <div class="card"><h3>Backtest (${bt.from}–${bt.to})</h3>
-  <table><tr><th>สัญญาณ</th><th>ไม้</th><th>Win</th><th>เฉลี่ย</th><th>PF</th></tr>
-  <tr><td>Bollinger ล่าง</td><td>${bt.bb.n.toLocaleString()}</td><td>${(bt.bb.win*100).toFixed(0)}%</td><td>${pct(bt.bb.avg,2)}</td><td>${bt.bb.pf}</td></tr>
-  <tr><td>RSI(2) &lt; 5</td><td>${bt.rsi2.n.toLocaleString()}</td><td>${(bt.rsi2.win*100).toFixed(0)}%</td><td>${pct(bt.rsi2.avg,2)}</td><td>${bt.rsi2.pf}</td></tr>
-  <tr><td>ซื้อสุ่ม (เทียบ)</td><td>–</td><td>–</td><td>${pct(bt.random_avg,2)}</td><td>–</td></tr></table>
-  <p class="note" style="margin-top:8px">ซื้อที่ราคาเปิดวันถัดไป หักค่าใช้จ่ายไปกลับ 0.1% · ชนะทั้งช่วงจูน (2018–22) และช่วงทดสอบ (2023–26)</p></div>
-  <div class="card"><h3>สิ่งที่ทดสอบแล้วไม่ผ่าน</h3><ul class="rules" style="font-size:13px">
-   <li>MACD ตัดขึ้น (Daily/Weekly/Monthly) ≈ ซื้อสุ่ม ทุกช่วงเวลาถือ</li>
-   <li>Breakout: New 52w high, Donchian 55, Golden cross แย่กว่าซื้อสุ่ม</li>
-   <li>Momentum 12-1 รายเดือน: ดูดีมาก แต่เมื่อนับเฉพาะหุ้นที่อยู่ใน index จริง ณ เวลานั้น ได้ +10.8%/ปี เท่ากับ SPY (2005–26)</li>
-   <li>ใส่ Stop loss ให้กลยุทธ์นี้ ผลเฉลี่ยลดลง</li></ul></div>
-  <div class="card"><h3>ข้อจำกัด</h3><p class="note">Backtest ใช้รายชื่อหุ้น S&P ปัจจุบัน หุ้นที่ถูกถอดออกไม่อยู่ในข้อมูล ซึ่งทำให้กลยุทธ์ซื้อตอนย่อดูดีเกินจริง → ใช้แท็บ “ผลจริง” ตัดสินก่อนลงเงินจริง · ข้อมูล EOD จาก Yahoo Finance (yfinance) อาจล่าช้า/ผิดพลาด · ไม่ใช่คำแนะนำการลงทุน</p></div>`;
+  <div class="card"><h3>ETF Pullback (หลัก)</h3><ul class="rules">
+   <li>ETF 18 ตัว: SPY QQQ IWM DIA MDY, Sector 9 ตัว, TLT GLD EFA EEM</li>
+   <li>ราคา &gt; SMA200 · ราคาปิดหลุด Bollinger ล่าง (20,2) · VIX &gt; 15</li>
+   <li><b>ซื้อ:</b> Buy limit = ราคาปิด − 0.5×ATR(14) ใช้ได้รอบถัดไปรอบเดียว</li>
+   <li><b>ขาย:</b> RSI(2) ปิด &gt; 70 → ขายที่ราคาเปิดรอบถัดไป · หรือขายตอนปิดวันที่ 10</li>
+   <li>แบ่งเงิน 3–5 ช่อง · ไม่ใช้ leverage · เงินว่างพักในกองทุนตลาดเงิน</li></ul>
+  <table style="margin-top:8px"><tr><th></th><th>ไม้</th><th>Win</th><th>เฉลี่ย</th><th>PF</th></tr>
+  <tr><td>Backtest ${e.from}–${e.to}</td><td>${e.n}</td><td>${(e.win*100).toFixed(0)}%</td><td>${pct(e.avg,2)}</td><td>${e.pf}</td></tr>
+  <tr><td>ซื้อสุ่ม (เทียบ)</td><td>–</td><td>${(e.random_win*100).toFixed(0)}%</td><td>${pct(e.random_avg,2)}</td><td>–</td></tr></table>
+  <p class="note" style="margin-top:8px">ไม่มี survivorship bias · ช่วงจูน 1994–2012 win 76% / ช่วงทดสอบ 2013–2026 win 77% · นับว่าได้ของเมื่อราคาทะลุ limit ลงไป ≥ 0.2% · หักค่าใช้จ่าย 0.1% · Buy limit ได้ของ ~${(e.fillRate*100).toFixed(0)}% ของสัญญาณ</p></div>
+  <div class="card"><h3>คาดหวังอะไรได้บ้าง</h3><ul class="rules" style="font-size:13px">
+   <li>Win สูง แต่สัญญาณน้อย เงินว่างเกือบตลอด → พอร์ตแบ่ง 5 ช่องโต ~2%/ปีจากการเทรด (+ ดอกเบี้ยเงินที่ว่าง)</li>
+   <li>Drawdown ต่ำ (~−10 ถึง −15% ในอดีต) เทียบกับ SPY −55%</li>
+   <li>ไม่ได้ทำให้พอร์ตโตเร็วกว่าถือดัชนี · เหมาะกับเงินก้อนเล็กที่อยากเทรดอย่างมีวินัย</li></ul></div>
+  <div class="card"><h3>หุ้นรายตัว (ทดลอง)</h3><p class="note">S&P 500 · ราคา &gt; SMA200 · หลุด BB ล่าง หรือ RSI(2) &lt; 5 · ซื้อที่ราคาเปิด · ขายเมื่อปิด &gt; SMA5 หรือ 10 วัน · Backtest ${s.from}–${s.to}: win ${(s.bb.win*100).toFixed(0)}% · ${pct(s.bb.avg,2)}/ไม้ · แย่สุด ${pct(s.bb.worst,0)} · มี survivorship bias</p></div>
+  <div class="card"><h3>ทดสอบแล้วไม่ผ่าน</h3><ul class="rules" style="font-size:13px">
+   <li>MACD ทุก timeframe ≈ ซื้อสุ่ม · Breakout / Golden cross แย่กว่าสุ่ม</li>
+   <li>Momentum 12-1: เท่า SPY เมื่อทดสอบแบบ point-in-time</li>
+   <li>Turn-of-month: edge บาง · Stop loss: ทำให้ผลแย่ลง</li>
+   <li>Day trade: ยังไม่ได้ทดสอบ (ต้องใช้ข้อมูล intraday แบบเสียเงิน)</li></ul></div>
+  <div class="card"><p class="note">ข้อมูล EOD จาก Yahoo Finance (yfinance) อาจล่าช้า/ผิดพลาด · ผลในอดีตไม่รับประกันอนาคต · ไม่ใช่คำแนะนำการลงทุน</p></div>`;
 }
 
 function drawChart(cv,t){
   const ch=t.chart,n=ch.c.length,dpr=devicePixelRatio||1,W=cv.clientWidth,H=280;
   cv.width=W*dpr;cv.height=H*dpr;cv.style.height=H+'px';const g=cv.getContext('2d');g.scale(dpr,dpr);
-  const pr=48,cw=(W-4-pr)/n,x=i=>4+cw*(i+.5);
+  const pr=52,cw=(W-4-pr)/n,x=i=>4+cw*(i+.5);
   const vals=[...ch.l,...ch.h,...ch.bb_lo.filter(v=>v!=null),...ch.bb_hi.filter(v=>v!=null),...ch.sma200.filter(v=>v!=null)];
+  if(t.limit)vals.push(t.limit);
   let lo=Math.min(...vals),hi=Math.max(...vals);const r=hi-lo;lo-=r*.03;hi+=r*.03;
   const y=v=>8+(hi-v)/(hi-lo)*(H-30);
   g.font='10px "JetBrains Mono",monospace';g.textBaseline='middle';
@@ -190,29 +210,37 @@ function drawChart(cv,t){
   const line=(a,c,w=1.3,dash)=>{g.strokeStyle=c;g.lineWidth=w;g.setLineDash(dash||[]);g.beginPath();let s=0;a.forEach((v,i)=>{if(v==null)return;s++?g.lineTo(x(i),y(v)):g.moveTo(x(i),y(v))});g.stroke();g.setLineDash([])};
   line(ch.bb_lo,'#5aa9ff88',1,[3,3]);line(ch.bb_hi,'#5aa9ff88',1,[3,3]);
   for(let i=0;i<n;i++){const u=ch.c[i]>=ch.o[i];g.strokeStyle=g.fillStyle=u?'#2fd18b':'#ff5d6c';g.beginPath();g.moveTo(x(i),y(ch.h[i]));g.lineTo(x(i),y(ch.l[i]));g.stroke();const a=y(Math.max(ch.o[i],ch.c[i])),b=y(Math.min(ch.o[i],ch.c[i]));g.fillRect(x(i)-Math.max(1,cw*.32),a,Math.max(2,cw*.64),Math.max(1,b-a))}
-  line(ch.sma5,'#f5b84a',1.4);line(ch.sma200,'#c08bff',1.4);
+  if(M==='stk')line(ch.sma5,'#f5b84a',1.4);line(ch.sma200,'#c08bff',1.4);
   const si=ch.d.indexOf(t.sigDate);if(si>=0){g.strokeStyle='#2fd18b';g.lineWidth=1.5;g.beginPath();g.arc(x(si),y(ch.l[si])+8,5,0,7);g.stroke()}
-  if(t.entry){g.setLineDash([4,4]);g.strokeStyle='#e8edf3';g.beginPath();g.moveTo(4,y(t.entry));g.lineTo(W-pr,y(t.entry));g.stroke();g.setLineDash([]);g.fillStyle='#e8edf3';g.fillRect(W-pr+1,y(t.entry)-8,pr-2,16);g.fillStyle='#0b0f14';g.fillText('BUY',W-pr+6,y(t.entry))}
-  g.fillStyle='#f5b84a';g.fillText('SMA5',8,H-10);g.fillStyle='#c08bff';g.fillText('SMA200',46,H-10);g.fillStyle='#5aa9ff';g.fillText('BB(20,2)',100,H-10);
+  const hl=(v,lab,col)=>{g.setLineDash([4,4]);g.strokeStyle=col;g.beginPath();g.moveTo(4,y(v));g.lineTo(W-pr,y(v));g.stroke();g.setLineDash([]);g.fillStyle=col;g.fillRect(W-pr+1,y(v)-8,pr-2,16);g.fillStyle='#0b0f14';g.fillText(lab,W-pr+5,y(v))};
+  if(t.entry)hl(t.entry,'BUY','#e8edf3');else if(t.limit)hl(t.limit,'LIMIT','#2fd18b');
+  g.fillStyle='#c08bff';g.fillText('SMA200',8,H-10);g.fillStyle='#5aa9ff';g.fillText('BB(20,2)',60,H-10);if(M==='stk'){g.fillStyle='#f5b84a';g.fillText('SMA5',124,H-10)}
 }
 
 function open_(key){
-  const t=[...D.today,...D.open].find(x=>x.key===key);if(!t)return;
+  const t=[...X().today,...X().open].find(x=>x.key===key);if(!t)return;
   const [a]=ACT[t.action]||['b'];
   const col={g:'#0f2a1f;color:#bff3da;border:1px solid #1f5a40',r:'#2b1418;color:#ffd0d5;border:1px solid #5a2530',b:'#101b2a;color:#cfe4ff;border:1px solid #22405f'}[a];
-  $('#panel').innerHTML=`<div class="grab"></div>
-  <div class="dh"><div><div class="tk" style="font-size:22px">${t.tk}</div><div class="nm">${t.name||''}${t.sector?' · '+t.sector:''}</div><div class="num" style="margin-top:2px">$${fmt(t.price)} <span class="${t.chg>=0?'up':'dn'}" style="font-size:13px">${pct(t.chg,2)}</span></div></div><button class="x" id="close">×</button></div>
-  <div class="act" style="background:${col}">${t.actionText}</div>
-  <div class="card" style="padding:10px 6px"><canvas id="cv"></canvas></div>
-  <div class="plan">
+  const etf=M==='etf';
+  const boxes=etf?`
+   <div style="border-color:#2fd18b"><span>${t.entry?'ซื้อได้ที่ ('+thd(t.entryDate)+')':'Buy limit (รอบถัดไปเท่านั้น)'}</span><b>$${fmt(t.entry||t.limit)}</b></div>
+   <div style="border-color:#e8edf3"><span>ราคาปิดวันสัญญาณ ${thd(t.sigDate)}</span><b>$${fmt(t.sigClose)}</b></div>
+   <div style="border-color:#f5b84a"><span>ขายเมื่อ RSI(2) ปิด &gt; 70 · ตอนนี้</span><b>${fmt(t.rsi2,0)}</b></div>
+   <div style="border-color:#5aa9ff"><span>${t.status==='open'?'ผลตอนนี้ · วันที่':'ถือสูงสุด'}</span><b>${t.status==='open'?pct(t.ret)+' · '+t.day+'/10':'10 วัน'}</b></div>`:`
    <div style="border-color:#2fd18b"><span>สัญญาณ ${thd(t.sigDate)}</span><b style="font-family:inherit;font-size:14px">${t.tags.map(k=>TAG[k]).join(' + ')}</b></div>
    <div style="border-color:#e8edf3"><span>${t.entry?'ซื้อที่ (เปิด '+thd(t.entryDate)+')':'ราคาปิดวันสัญญาณ'}</span><b>$${fmt(t.entry||t.sigClose)}</b></div>
    <div style="border-color:#f5b84a"><span>ขายเมื่อราคาปิดเหนือ SMA5</span><b>$${fmt(t.sma5)}</b></div>
-   <div style="border-color:#5aa9ff"><span>${t.status==='open'?'ผลตอนนี้ · วันที่':'ถือสูงสุด'}</span><b>${t.status==='open'?pct(t.ret)+' · '+t.day+'/10':'10 วัน'}</b></div>
-  </div>
-  <div class="kv" style="margin-top:8px"><div><span>RSI(2)</span><b>${fmt(t.rsi2,1)}</b></div><div><span>ต่ำกว่า BB ล่าง</span><b>${pct(t.bbDepth)}</b></div><div><span>เหนือ SMA200</span><b>${pct(t.pctSma200)}</b></div></div>
+   <div style="border-color:#5aa9ff"><span>${t.status==='open'?'ผลตอนนี้ · วันที่':'ถือสูงสุด'}</span><b>${t.status==='open'?pct(t.ret)+' · '+t.day+'/10':'10 วัน'}</b></div>`;
+  const kv=etf?`<div><span>VIX วันสัญญาณ</span><b>${fmt(t.vix,1)}</b></div><div><span>ต่ำกว่า BB ล่าง</span><b>${pct(t.bbDepth)}</b></div><div><span>เหนือ SMA200</span><b>${pct(t.pctSma200)}</b></div>`
+    :`<div><span>RSI(2)</span><b>${fmt(t.rsi2,1)}</b></div><div><span>ต่ำกว่า BB ล่าง</span><b>${pct(t.bbDepth)}</b></div><div><span>เหนือ SMA200</span><b>${pct(t.pctSma200)}</b></div>`;
+  $('#panel').innerHTML=`<div class="grab"></div>
+  <div class="dh"><div><div class="tk" style="font-size:22px" data-tk="${t.tk}">${t.tk}</div><div class="nm">${t.name||''}${t.sector&&t.sector!=='ETF'?' · '+t.sector:''}</div><div class="num" style="margin-top:2px">$${fmt(t.price)} <span class="${t.chg>=0?'up':'dn'}" style="font-size:13px">${pct(t.chg,2)}</span></div></div><button class="x" id="close">×</button></div>
+  <div class="act" style="background:${col}">${t.actionText}</div>
+  <div class="card" style="padding:10px 6px"><canvas id="cv"></canvas></div>
+  <div class="plan">${boxes}</div>
+  <div class="kv" style="margin-top:8px">${kv}</div>
   <p style="margin:12px 0"><a class="chip" href="https://www.tradingview.com/chart/?symbol=${encodeURIComponent(t.tk.replace('-','.'))}" target="_blank" rel="noopener">เปิดกราฟใน TradingView ↗</a></p>
-  <p class="note">SMA5 เปลี่ยนทุกวัน ระดับขายจะอัปเดตทุกเช้า · ไม่ใช่คำแนะนำการลงทุน</p>`;
+  <p class="note">${etf?'ถ้า Buy limit ไม่ได้ของในรอบถัดไป ให้ยกเลิกคำสั่ง ห้ามไล่ราคา · ':'SMA5 เปลี่ยนทุกวัน · '}ข้อมูลอัปเดตทุกเช้า · ไม่ใช่คำแนะนำการลงทุน</p>`;
   $('#sheet').classList.add('open');document.body.style.overflow='hidden';
   requestAnimationFrame(()=>drawChart($('#cv'),t));$('#close').onclick=close_;
 }
@@ -222,15 +250,17 @@ addEventListener('keydown',e=>{if(e.key==='Escape')close_()});
 document.addEventListener('click',e=>{const r=e.target.closest('.row');if(r)open_(r.dataset.k)});
 function go(v){document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('on',b.dataset.v===v));['buy','open','live','res'].forEach(k=>$('#v-'+k).classList.toggle('hide',k!==v));scrollTo(0,0)}
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>go(b.dataset.v));
-
+function badges(){const s=X().open.filter(t=>t.action.startsWith('sell')).length,b=X().today.length;
+  $('#bBuy').textContent=b;$('#bBuy').classList.toggle('hide',!b);$('#bBuy').style.background='var(--up)';
+  $('#bSell').textContent=s;$('#bSell').classList.toggle('hide',!s)}
+function render(){document.querySelectorAll('#seg button').forEach(b=>b.classList.toggle('on',b.dataset.m===M));
+  $('#asof').textContent=`${M==='etf'?'ETF '+X().scanned+' ตัว':'หุ้น '+X().scanned+' ตัว'} · ปิดตลาด ${thd(D.asOf)}`;
+  badges();renderBuy();renderOpen();renderLive();renderRes()}
+document.querySelectorAll('#seg button').forEach(b=>b.onclick=()=>{M=b.dataset.m;try{localStorage.setItem('sr_mode',M)}catch(e){};if(D)render()});
 fetch('data/latest.json?'+Date.now()).then(r=>{if(!r.ok)throw 0;return r.json()}).then(d=>{
-  if(d.mode!=='pullback')throw 0;D=d;
-  $('#asof').textContent=`สแกน ${D.scanned} ตัว · ปิดตลาด ${thd(D.asOf)}`;
-  if((Date.now()-new Date(D.generated))/36e5>80)$('#v-buy').insertAdjacentHTML('beforebegin','<div class="banner warn"><span class="dot" style="background:var(--amb)"></span><div>ข้อมูลไม่ได้อัปเดตมากกว่า 3 วัน ลองเช็ก GitHub Actions</div></div>');
-  const s=D.open.filter(t=>t.action.startsWith('sell')).length;
-  if(D.today.length){$('#bBuy').textContent=D.today.length;$('#bBuy').classList.remove('hide');$('#bBuy').style.background='var(--up)'}
-  if(s){$('#bSell').textContent=s;$('#bSell').classList.remove('hide')}
-  renderBuy();renderOpen();renderLive();renderRes();
+  if(d.mode!=='v3')throw 0;D=d;
+  if((Date.now()-new Date(D.generated))/36e5>80)document.querySelector('.app header').insertAdjacentHTML('afterend','<div class="banner warn"><span class="dot" style="background:var(--amb)"></span><div>ข้อมูลไม่ได้อัปเดตมากกว่า 3 วัน ลองเช็ก GitHub Actions</div></div>');
+  render();
 }).catch(()=>{$('#v-buy').innerHTML='<div class="card empty">ยังไม่มีข้อมูลเวอร์ชันใหม่ รอระบบสแกนรอบถัดไป</div>'});
 </script>
 </body>
