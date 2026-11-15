@@ -45,7 +45,7 @@ def simulate(I, t, spec, res_fn=None, until=None):
         return {"status": "pending"}
     entry = I.o[t + 1]
     a = I.atr[t]
-    risk = spec["stop_atr"] * a
+    risk = spec["stop_atr"] * a if spec.get("stop_atr") else 1e9
     stop = entry - risk
     target = _target(I, t, entry, risk, spec, res_fn)
     hc = entry
@@ -69,7 +69,7 @@ def simulate(I, t, spec, res_fn=None, until=None):
                 return _close(target, entry, k, "target")
         # end-of-day updates
         hc = max(hc, I.c[i])
-        r_mult = (I.c[i] - entry) / risk if risk > 0 else 0
+        r_mult = (I.c[i] - entry) / risk if 0 < risk < 1e8 else 0
         if spec.get("be_at_r") and r_mult >= spec["be_at_r"]:
             stop = max(stop, entry)
         if spec.get("trail_after_r") and r_mult >= spec["trail_after_r"]:
@@ -80,6 +80,8 @@ def simulate(I, t, spec, res_fn=None, until=None):
             pending_exit = "macd_down"
         if spec.get("ema20_exit") and I.c[i] < I.e20[i]:
             pending_exit = "below_ema20"
+        if spec.get("sma5_exit") and I.c[i] > I.sma5[i]:
+            pending_exit = "above_sma5"
         if k == spec["max_hold"]:
             return _close(I.c[i], entry, k, "time")
     return {"status": "error"}
