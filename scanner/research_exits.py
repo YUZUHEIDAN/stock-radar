@@ -30,10 +30,13 @@ def main():
         I = analyze(df)
         n = len(I.c)
         for t in range(600, n - 63):
-            if not fresh_cross(I, t) or not np.isfinite(I.atr[t]) or not (I.c[t] > 5 and I.dv20[t] > 20e6):
+            is_x = fresh_cross(I, t)
+            if not (is_x or t % 10 == 0) or not np.isfinite(I.atr[t]) or not (I.c[t] > 5 and I.dv20[t] > 20e6):
                 continue
-            r = {"tk": tk, "date": df.index[t].date(), "gap": I.o[t + 1] / I.c[t] - 1}
+            r = {"tk": tk, "date": df.index[t].date(), "is_cross": is_x, "gap": I.o[t + 1] / I.c[t] - 1}
             for name, spec in STRATS.items():
+                if not is_x and name not in ("S0_fixed_res", "S1_stop2_time20", "S8_trail3_60"):
+                    continue
                 o = simulate(I, t, spec, res_fn)
                 r[name] = o.get("ret"); r[name + "_d"] = o.get("days"); r[name + "_w"] = o.get("why")
             rows.append(r)
