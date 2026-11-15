@@ -68,14 +68,14 @@ def fetch_universe() -> pd.DataFrame:
 
 
 # ---------------- data ----------------
-def download(tickers: list[str]) -> dict[str, pd.DataFrame]:
+def download(tickers: list[str], period: str = "6y") -> dict[str, pd.DataFrame]:
     import yfinance as yf
     out = {}
     for i in range(0, len(tickers), 100):
         chunk = tickers[i : i + 100]
         for attempt in range(3):
             try:
-                raw = yf.download(chunk, period="6y", interval="1d", auto_adjust=True, group_by="ticker",
+                raw = yf.download(chunk, period=period, interval="1d", auto_adjust=True, group_by="ticker",
                                   threads=True, progress=False)
                 break
             except Exception as e:
