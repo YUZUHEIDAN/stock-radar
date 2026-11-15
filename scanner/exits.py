@@ -88,4 +88,4 @@ def simulate(I, t, spec, res_fn=None, until=None):
 
 
 def _close(px, entry, days, why):
-    return {"status": "closed", "exit": px, "ret": px / entry - 1 - COST, "days": days, "why": why}
+    return {"status": "closed", "entry": entry, "exit": px, "ret": px / entry - 1 - COST, "days": days, "why": why}
