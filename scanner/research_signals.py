@@ -139,8 +139,8 @@ def main():
         if len(m) < 100:
             continue
         q = m.rank(pct=True)
-        recs.append({"date": d.date(), "top20": f[m.nlargest(20).index].mean(), "top_decile": f[q > 0.9].mean(),
-                     "bottom_decile": f[q <= 0.1].mean(), "ew_all": f[m.index].mean(), "spy": spy_f.loc[d]})
+        recs.append({"date": d.date(), "top20": f[m.nlargest(20).index].mean(), "top_decile": f[q[q > 0.9].index].mean(),
+                     "bottom_decile": f[q[q <= 0.1].index].mean(), "ew_all": f[m.index].mean(), "spy": spy_f.loc[d]})
     pd.DataFrame(recs).to_csv(out / "momentum.csv", index=False, float_format="%.5g")
     print("momentum months", len(recs))
 
