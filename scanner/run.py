@@ -28,25 +28,43 @@ UA = {"User-Agent": "Mozilla/5.0 (stock-radar personal screener)"}
 
 # ---------------- universe ----------------
 def fetch_universe() -> pd.DataFrame:
+    """S&P 500 (GitHub datasets CSV) + Nasdaq-100 (Wikipedia). Falls back to scanner/universe.csv."""
+    parts = []
     try:
-        def wiki(url):
-            return pd.read_html(StringIO(requests.get(url, headers=UA, timeout=30).text))
-        sp = next(t for t in wiki("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies") if "Symbol" in t.columns)
-        sp = sp.rename(columns={"Symbol": "tk", "Security": "name", "GICS Sector": "sector"})[["tk", "name", "sector"]]
-        nd = next(t for t in wiki("https://en.wikipedia.org/wiki/Nasdaq-100") if "Ticker" in t.columns)
-        sec_col = next((c for c in nd.columns if "Sector" in c), None)
-        nd = nd.rename(columns={"Ticker": "tk", "Company": "name", **({sec_col: "sector"} if sec_col else {})})
-        if "sector" not in nd:
-            nd["sector"] = ""
-        nd = nd[["tk", "name", "sector"]]
-        u = pd.concat([sp, nd]).drop_duplicates("tk")
-        u["tk"] = u["tk"].str.replace(".", "-", regex=False).str.strip()
-        if len(u) > 450:
-            u.to_csv(UNIVERSE_CACHE, index=False)
-            return u.reset_index(drop=True)
-    except Exception as e:  # network / layout change → fall back to cache
-        print("universe fetch failed, using cache:", e)
-    return pd.read_csv(UNIVERSE_CACHE)
+        sp = pd.read_csv("https://raw.githubusercontent.com/datasets/s-and-p-500-companies/main/data/constituents.csv",
+                         storage_options=UA)
+        parts.append(sp.rename(columns={"Symbol": "tk", "Security": "name", "GICS Sector": "sector"})[["tk", "name", "sector"]])
+        print("S&P 500:", len(parts[-1]))
+    except Exception as e:
+        print("S&P 500 fetch failed:", repr(e))
+    try:
+        html = requests.get("https://en.wikipedia.org/wiki/Nasdaq-100", headers=UA, timeout=30).text
+        for t in pd.read_html(StringIO(html)):
+            cols = {str(c).strip(): c for c in t.columns}
+            tcol = next((cols[c] for c in ("Ticker", "Symbol") if c in cols), None)
+            if tcol is None or not (90 <= len(t) <= 110):
+                continue
+            ncol = next((cols[c] for c in ("Company", "Security", "Name") if c in cols), tcol)
+            scol = next((v for k, v in cols.items() if "Sector" in k), None)
+            nd = pd.DataFrame({"tk": t[tcol], "name": t[ncol], "sector": t[scol] if scol is not None else ""})
+            parts.append(nd)
+            print("Nasdaq-100:", len(nd))
+            break
+        else:
+            print("Nasdaq-100 table not found on Wikipedia")
+    except Exception as e:
+        print("Nasdaq-100 fetch failed:", repr(e))
+
+    cache = pd.read_csv(UNIVERSE_CACHE) if UNIVERSE_CACHE.exists() else pd.DataFrame(columns=["tk", "name", "sector"])
+    if not parts:
+        print("using cached universe")
+        return cache
+    u = pd.concat(parts + [cache]).astype({"tk": str})
+    u["tk"] = u["tk"].str.strip().str.replace(".", "-", regex=False)
+    u = u.drop_duplicates("tk").reset_index(drop=True)
+    if len(u) >= 450:
+        u.to_csv(UNIVERSE_CACHE, index=False)
+    return u
 
 
 # ---------------- data ----------------
